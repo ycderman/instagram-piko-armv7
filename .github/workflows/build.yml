@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -18,28 +18,38 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Check input APKM
+      - name: Check Instagram 439 ARMv7 input
         run: |
           set -euo pipefail
-          test -s input/instagram-armv7.apkm
-          unzip -t input/instagram-armv7.apkm >/dev/null
+          test -s input/instagram-439-armv7.apk
+          unzip -t input/instagram-439-armv7.apk >/dev/null
 
-      - name: Fetch Piko stable bundle
-        run: |
-          set -euo pipefail
-          mkdir -p work apk
-          curl -fsSL https://raw.githubusercontent.com/crimera/piko/main/patches-bundle.json -o work/patches-bundle.json
-          PIKO_URL=$(jq -r '.download_url' work/patches-bundle.json)
-          curl -fsSL "$PIKO_URL" -o work/piko.mpp
-
-      - name: Fetch Morphe Desktop stable
+      - name: Fetch Piko v3.9.0-dev.6
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/MorpheApp/morphe-desktop/releases/latest -o work/morphe.json
-          MORPHE_URL=$(jq -r '.assets[] | select(.name | endswith("-all.jar")) | .browser_download_url' work/morphe.json | head -n1)
-          curl -fsSL "$MORPHE_URL" -o work/morphe.jar
+          mkdir -p work apk
+          gh release download v3.9.0-dev.6 \
+            --repo crimera/piko \
+            --pattern '*.mpp' \
+            --dir work
+          PIKO_MPP=$(find work -maxdepth 1 -type f -name '*.mpp' -print -quit)
+          test -n "$PIKO_MPP"
+          mv "$PIKO_MPP" work/piko.mpp
+
+      - name: Fetch latest Morphe Desktop
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download \
+            --repo MorpheApp/morphe-desktop \
+            --pattern '*-all.jar' \
+            --dir work
+          MORPHE_JAR=$(find work -maxdepth 1 -type f -name '*-all.jar' -print -quit)
+          test -n "$MORPHE_JAR"
+          mv "$MORPHE_JAR" work/morphe.jar
 
       - name: Patch minimal ARMv7 build
         env:
@@ -49,32 +59,23 @@ jobs:
           java -Xms256m -Xmx3g -jar work/morphe.jar patch \
             -p work/piko.mpp \
             --exclusive \
-            -e "Disable ads" \
-            -e "Download media" \
-            -e "Clone" \
+            -e 'Disable ads' \
+            -e 'Download media' \
+            -e 'Clone' \
             --striplibs armeabi-v7a \
-            -o apk/instagram-piko-armv7-minimal.apk \
-            input/instagram-armv7.apkm
+            --bytecode-mode STRIP_SAFE \
+            -o apk/instagram-439-piko-armv7-minimal.apk \
+            input/instagram-439-armv7.apk
 
-      - name: Verify APK
+      - name: Verify output
         run: |
           set -euo pipefail
-          test -s apk/instagram-piko-armv7-minimal.apk
-          unzip -t apk/instagram-piko-armv7-minimal.apk >/dev/null
-          sha256sum apk/instagram-piko-armv7-minimal.apk | tee apk/SHA256SUMS
+          test -s apk/instagram-439-piko-armv7-minimal.apk
+          unzip -t apk/instagram-439-piko-armv7-minimal.apk >/dev/null
+          sha256sum apk/instagram-439-piko-armv7-minimal.apk | tee apk/SHA256SUMS
 
       - uses: actions/upload-artifact@v4
         with:
-          name: instagram-piko-armv7-minimal
+          name: instagram-439-piko-armv7-minimal
           path: apk/
           compression-level: 0
-
-      - name: Commit APK
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f apk/instagram-piko-armv7-minimal.apk apk/SHA256SUMS
-          git diff --cached --quiet && exit 0
-          git commit -m "Build minimal Piko ARMv7 APK"
-          git push
