@@ -1,0 +1,6 @@
+work/
+*.apkm
+*.mpp
+*.jar
+*.zip
+!apk/*.apk
